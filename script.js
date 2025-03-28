@@ -1,7 +1,75 @@
-const canvas = document.getElementById('tetris');
-const context = canvas.getContext('2d');
-const nextCanvas = document.getElementById('next');
-const nextContext = nextCanvas.getContext('2d');
+// グローバルエラーハンドリング
+window.onerror = function(msg, url, line, col, error) {
+    console.error('エラーが発生しました:', { msg, url, line, col, error });
+    resetGame();
+    return false;
+};
+
+// キャンバスの初期化
+function initCanvas() {
+    const canvas = document.getElementById('tetris');
+    const nextCanvas = document.getElementById('next');
+
+    if (!canvas || !nextCanvas) {
+        throw new Error('必要なキャンバス要素が見つかりません');
+    }
+
+    const context = canvas.getContext('2d');
+    const nextContext = nextCanvas.getContext('2d');
+
+    if (!context || !nextContext) {
+        throw new Error('キャンバスコンテキストの取得に失敗しました');
+    }
+
+    return { canvas, context, nextCanvas, nextContext };
+}
+
+// requestAnimationFrameのフォールバック
+const requestAnimationFrame = window.requestAnimationFrame ||
+    window.mozRequestAnimationFrame ||
+    window.webkitRequestAnimationFrame ||
+    window.msRequestAnimationFrame ||
+    function(callback) {
+        window.setTimeout(callback, 1000 / 60);
+    };
+
+const { canvas, context, nextCanvas, nextContext } = initCanvas();
+
+// ゲーム状態管理
+const gameState = {
+    isPlaying: false,
+    isPaused: false,
+    isGameOver: false
+};
+
+// ゲームのリセット
+function resetGame() {
+    arena.forEach(row => row.fill(0));
+    player.score = 0;
+    player.matrix = null;
+    player.next = null;
+    gameState.isGameOver = false;
+    gameState.isPaused = false;
+    updateScore();
+    playerReset();
+    console.debug('ゲームをリセットしました');
+}
+
+// パフォーマンスモニタリング
+let lastFrameTime = 0;
+let frameCount = 0;
+const fpsInterval = 1000;
+let currentFps = 0;
+
+function monitorPerformance(time) {
+    frameCount++;
+    if (time - lastFrameTime >= fpsInterval) {
+        currentFps = (frameCount * 1000) / (time - lastFrameTime);
+        frameCount = 0;
+        lastFrameTime = time;
+        console.debug('Current FPS:', currentFps.toFixed(1));
+    }
+}
 
 const BLOCK_SIZE = 30;
 const NEXT_BLOCK_SIZE = 30;
@@ -210,8 +278,8 @@ function drawMatrix(matrix, offset) {
             if (value !== 0) {
                 context.fillStyle = COLORS[value];
                 context.fillRect(x + offset.x,
-                               y + offset.y,
-                               1, 1);
+                                 y + offset.y,
+                                 1, 1);
             }
         });
     });
@@ -239,7 +307,12 @@ playerReset();
 updateScore();
 update();
 
-document.addEventListener('keydown', event => {
+// キーボード操作の設定
+function handleKeyboardInput(event) {
+    if (!gameState.isPlaying || gameState.isGameOver) return;
+
+    if (gameState.isPaused && event.key !== 'p' && event.key !== 'P') return;
+
     if (event.key === 'ArrowLeft') {
         playerMove(-1);
     } else if (event.key === 'ArrowRight') {
@@ -257,8 +330,70 @@ document.addEventListener('keydown', event => {
         playerReset();
         arenaSweep();
         updateScore();
+    } else if (event.key === 'p' || event.key === 'P') {
+        gameState.isPaused = !gameState.isPaused;
+        console.debug(gameState.isPaused ? 'ゲーム一時停止' : 'ゲーム再開');
+    } else if (event.key === 'r' || event.key === 'R') {
+        resetGame();
     }
-});
+}
+
+// タッチ操作の設定
+let touchStartX = null;
+let touchStartY = null;
+
+function handleTouchStart(event) {
+    if (!gameState.isPlaying || gameState.isGameOver || gameState.isPaused) return;
+
+    const touch = event.touches[0];
+    touchStartX = touch.clientX;
+    touchStartY = touch.clientY;
+    event.preventDefault();
+}
+
+function handleTouchMove(event) {
+    if (!touchStartX || !touchStartY || !gameState.isPlaying ||
+        gameState.isGameOver || gameState.isPaused) return;
+
+    const touch = event.touches[0];
+    const diffX = touch.clientX - touchStartX;
+    const diffY = touch.clientY - touchStartY;
+
+    // 30pxの移動でアクションを実行
+    if (Math.abs(diffX) > Math.abs(diffY)) {
+        if (Math.abs(diffX) > 30) {
+            playerMove(diffX > 0 ? 1 : -1);
+            touchStartX = touch.clientX;
+            touchStartY = touch.clientY;
+        }
+    } else {
+        if (diffY > 30) {
+            playerDrop();
+            touchStartY = touch.clientY;
+        } else if (diffY < -30) {
+            playerRotate(-1);
+            touchStartY = touch.clientY;
+        }
+    }
+
+    event.preventDefault();
+}
+
+function handleTouchEnd(event) {
+    touchStartX = null;
+    touchStartY = null;
+    event.preventDefault();
+}
+
+// イベントリスナーの設定
+document.addEventListener('keydown', handleKeyboardInput);
+canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
 
 // スケーリング設定
 context.scale(BLOCK_SIZE, BLOCK_SIZE);
+
+// ゲーム開始
+gameState.isPlaying = true;
+console.debug('ゲーム開始');
